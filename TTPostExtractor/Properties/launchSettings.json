@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "TTPostExtractor": {
+      "commandName": "Project",
+      "commandLineArgs": "H:\\Documents\\TumblThree\\Blogs\\theres-a-body-here\\texts.txt\r\nH:\\Documents\\TumblThree\\Blogs\\theres-a-body-here\\answers.txt"
+    }
+  }
+}
