@@ -1,100 +1,123 @@
 using System.Text.RegularExpressions;
-using ReverseMarkdown;
+using HtmlAgilityPack;
 
 namespace TTPostExtractor
 {
     internal partial class Program
     {
-        static void Main(string[] args)
+        private static void Main(string[] args)
         {
-            var posts = new List<Post>();
-
-            var converterConfig = new Config
-            {
-                // Include the unknown tag completely in the result (default as well)
-                UnknownTags = Config.UnknownTagsOption.PassThrough,
-                // will ignore all comments
-                RemoveComments = false,
-                // remove markdown output for links where appropriate
-                SmartHrefHandling = true
-            };
-
-
             foreach (var file in args)
             {
                 var rawData = File.ReadAllText(file);
 
                 var rawPosts = rawData.Split(Environment.NewLine + Environment.NewLine) ?? throw new Exception();
 
+                var currentPath = string.Join('\\', file.Split('\\')[..^1]);
+
                 foreach (var item in rawPosts)
                 {
-                    if (item != string.Empty)
+                    if (item.Contains("Body: ") || item.Contains("Answer: "))
                     {
+                        var body = GetBody(item);
 
-                        var id = item.Substring(item.IndexOf("Post id: ") + 9, item.IndexOf("Date:") - item.IndexOf("Post id: ") - 9);
-
-                        var title = string.Empty;
-                        if (item.Contains("Title: "))
+                        if (body != null)
                         {
-                            title = item.Substring(item.IndexOf("Title: ") + 8, item.IndexOf("Body:") - item.IndexOf("Title: ") - 8);
-                            if (title == "\n")
+                            var image = GetImageFile(currentPath, item, body);
+
+                            if (image != null)
                             {
-                                title = string.Empty;
+                                var imageNumber = GetImageNumber(body);
+
+                                if (!string.IsNullOrEmpty(imageNumber))
+                                {
+                                    var newPath = Path.Combine(currentPath, $"{imageNumber}{image.Extension}");
+
+                                    if (File.Exists(image.FullName))
+                                    {
+                                        File.Move(image.FullName, newPath, true);
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine($"File {image.FullName} not found");
+                                    }
+
+                                }
                             }
                         }
 
-                        string body;
 
-                        if (item.Contains("Body: "))
-                        {
-                            body = item.Substring(item.IndexOf("Body: ") + 6, item.IndexOf("Tags:") - item.IndexOf("Body: ") - 6);
 
-                        }
-                        else if (item.Contains("Answer: "))
-                        {
-                            body = item.Substring(item.IndexOf("Answer: ") + 8, item.IndexOf("Tags:") - item.IndexOf("Answer: ") - 8);
-                        }
-                        else
-                        {
-                            body = string.Empty;
-                        }
-
-                        string tags;
-                        if (item.Contains("Downloaded files: "))
-                        {
-                            tags = item.Substring(item.IndexOf("Tags: "), item.IndexOf("Downloaded files:") - item.IndexOf("Tags: "));
-                        }
-                        else
-                        {
-                            tags = item[(item.IndexOf("Tags: ") + 6)..];
-                        }
-
-                        if (body != string.Empty)
-                        {
-                            body = BodyFigureReplacement().Replace(body, string.Empty);
-                        }
-
-                        var postBodyMarkdown = new Converter(converterConfig).Convert(body);
-
-                        posts.Add(new Post
-                        {
-                            Id = id.Replace(Environment.NewLine, string.Empty),
-                            Title = title,
-                            Body = postBodyMarkdown,
-                            Tags = tags,
-                        });
                     }
                 }
 
             }
+        }
+        private static string? GetImageNumber(string body)
+        {
+            var htmlDoc = new HtmlDocument();
+            htmlDoc.LoadHtml(body);
+            var numberParagraph = htmlDoc.DocumentNode.SelectNodes("//p").LastOrDefault();
 
-            foreach (var item in posts)
+            return numberParagraph == null ? null : NumberGetter().Match(numberParagraph.InnerText).Value;
+
+        }
+
+        private static string? GetBody(string item)
+        {
+            if (item.Contains("Body: "))
             {
-                File.WriteAllText(item.Id + ".md", item.Title + Environment.NewLine + item.Body + Environment.NewLine + item.Tags);
+                return item.Substring(item.IndexOf("Body: ") + 6, item.IndexOf("Tags:") - item.IndexOf("Body: ") - 6);
+
             }
+            else if (item.Contains("Answer: "))
+            {
+                return item.Substring(item.IndexOf("Answer: ") + 8, item.IndexOf("Tags:") - item.IndexOf("Answer: ") - 8);
+            }
+
+            return null;
+        }
+
+        private static FileInfo? GetImageFile(string currentPath, string post, string body)
+        {
+            if (post.Contains("Downloaded files: "))
+            {
+                return new FileInfo(Path.Combine(currentPath, post[(post.IndexOf("Downloaded files: ") + 19)..^1]));
+            }
+            else
+            {
+                var bodyHtmlDock = new HtmlDocument();
+                bodyHtmlDock.LoadHtml(body);
+
+                try
+                {
+                    var imagetag = bodyHtmlDock.DocumentNode.SelectNodes("//div/figure/img").LastOrDefault();
+                    if (imagetag != null)
+                    {
+                        var imageLink = imagetag?.Attributes["src"].Value;
+                        var imageFileName = imageLink?.Split('/').LastOrDefault();
+
+                        if (imageFileName != null)
+                        {
+                            return File.Exists(Path.Combine(currentPath, imageFileName))
+                                ? new FileInfo(Path.Combine(currentPath, imageFileName))
+                                : new FileInfo(Path.Combine(currentPath, imageFileName.Replace(".png", ".pnj.jpg")));
+                        }
+                    }
+                }
+                catch (ArgumentNullException)
+                {
+                    return null;
+                }
+            }
+
+            return null;
         }
 
         [GeneratedRegex("<figure\\b[^>]*>(.*?)<\\/figure>", RegexOptions.Multiline | RegexOptions.Compiled)]
         private static partial Regex BodyFigureReplacement();
+
+        [GeneratedRegex("^\\d+", RegexOptions.Compiled)]
+        private static partial Regex NumberGetter();
     }
 }
